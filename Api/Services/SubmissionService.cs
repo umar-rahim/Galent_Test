@@ -7,7 +7,8 @@ namespace Api.Services;
 public sealed class SubmissionService(
     ISubmissionRepository submissions,
     IForm1040Calculator calculator,
-    IForm1040Validator validator) : ISubmissionService
+    IForm1040Validator validator,
+    ILogger<SubmissionService> logger) : ISubmissionService
 {
     public async Task<IReadOnlyList<SubmissionListItem>> ListAsync(SubmissionActor actor, CancellationToken cancellationToken)
     {
@@ -25,6 +26,7 @@ public sealed class SubmissionService(
     {
         var submission = new Form1040Submission { UserId = actor.UserId, Form = new Form1040Data() };
         await submissions.AddAsync(submission, cancellationToken);
+        logger.LogInformation("Created submission {SubmissionId} for user {UserId}.", submission.Id, actor.UserId);
         return submission;
     }
 
@@ -54,6 +56,7 @@ public sealed class SubmissionService(
         form.SubmissionId = submission.Id;
         calculator.Recalculate(form);
         await submissions.UpdateDraftAsync(submission, form, cancellationToken);
+        logger.LogInformation("Draft submission {SubmissionId} was saved by user {UserId}.", id, actor.UserId);
         return new(true, ToResponse(submission, true));
     }
 
@@ -76,6 +79,7 @@ public sealed class SubmissionService(
             Message = finding.Message
         }).ToList();
         await submissions.ReplaceFindingsAsync(submission, records, cancellationToken);
+        logger.LogInformation("Validation completed for submission {SubmissionId} with {FindingCount} findings.", id, findings.Count);
 
         var calculated = new CalculatedFormLines(submission.Form.Line1z, submission.Form.Line9, submission.Form.Line11a,
             submission.Form.Line15, submission.Form.Line24, submission.Form.Line33, submission.Form.Line34, submission.Form.Line37);
@@ -107,11 +111,13 @@ public sealed class SubmissionService(
                 Message = finding.Message
             }).ToList();
             await submissions.ReplaceFindingsAsync(submission, records, cancellationToken);
+            logger.LogWarning("Submission {SubmissionId} was not submitted because validation produced errors.", id);
             var responses = findings.Select(finding => new ValidationFindingResponse(finding.Code, finding.Severity, finding.Field, finding.Message)).ToArray();
             return new(false, null, "Validation failed.", 422, responses);
         }
 
         await submissions.SubmitAsync(submission, cancellationToken);
+        logger.LogInformation("Submission {SubmissionId} was submitted by user {UserId}.", id, actor.UserId);
         return new(true, new SubmissionStatusResult(submission.Id, submission.Status, submission.SubmittedAtUtc));
     }
 

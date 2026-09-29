@@ -2,7 +2,9 @@ using Api.Data;
 using Api.Models;
 using Api.Repositories;
 using Api.Services;
+using Api.Services.Contracts;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +27,11 @@ var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddHttpLogging(options =>
+    options.LoggingFields = HttpLoggingFields.RequestMethod
+        | HttpLoggingFields.RequestPath
+        | HttpLoggingFields.ResponseStatusCode
+        | HttpLoggingFields.Duration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCors(options =>
@@ -84,9 +91,12 @@ builder.Services.AddAuthentication(options =>
     {
         OnTokenValidated = async context =>
         {
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("JwtBearer");
             var jti = context.Principal?.FindFirst("jti")?.Value;
             if (string.IsNullOrWhiteSpace(jti))
             {
+                logger.LogWarning("JWT validation failed because the token identifier claim is missing.");
                 context.Fail("Token identifier is missing.");
                 return;
             }
@@ -94,6 +104,7 @@ builder.Services.AddAuthentication(options =>
             var authService = context.HttpContext.RequestServices.GetRequiredService<IAuthService>();
             if (await authService.IsRevokedAsync(jti, context.HttpContext.RequestAborted))
             {
+                logger.LogWarning("JWT validation rejected a revoked token.");
                 context.Fail("Token has been revoked.");
             }
         }
@@ -124,6 +135,20 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.UseHttpLogging();
+}
+else
+{
+    app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+    {
+        var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("UnhandledException");
+        logger.LogError(exception, "Unhandled exception processing {RequestMethod} {RequestPath}.", context.Request.Method, context.Request.Path);
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." });
+    }));
+    app.UseHttpLogging();
 }
 
 app.UseHttpsRedirection();
@@ -138,9 +163,19 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
+    var startupLogger = services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
     var db = services.GetRequiredService<ApplicationDbContext>();
-    await db.Database.MigrateAsync();
-    await SeedData.InitializeAsync(services);
+    try
+    {
+        await db.Database.MigrateAsync();
+        await SeedData.InitializeAsync(services);
+        startupLogger.LogInformation("Database migrations and initial data setup completed.");
+    }
+    catch (Exception exception)
+    {
+        startupLogger.LogCritical(exception, "API startup database initialization failed.");
+        throw;
+    }
 }
 
 app.Run();
