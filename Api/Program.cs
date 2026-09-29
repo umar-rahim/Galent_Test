@@ -91,8 +91,8 @@ builder.Services.AddAuthentication(options =>
                 return;
             }
 
-            var revokedTokens = context.HttpContext.RequestServices.GetRequiredService<IRevokedTokenRepository>();
-            if (await revokedTokens.IsRevokedAsync(jti, context.HttpContext.RequestAborted))
+            var authService = context.HttpContext.RequestServices.GetRequiredService<IAuthService>();
+            if (await authService.IsRevokedAsync(jti, context.HttpContext.RequestAborted))
             {
                 context.Fail("Token has been revoked.");
             }
@@ -100,10 +100,16 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+builder.Services.AddScoped<IHealthService, HealthService>();
 builder.Services.AddScoped<ISubmissionRepository, SubmissionRepository>();
 builder.Services.AddScoped<IDocumentRepository, DocumentRepository>();
 builder.Services.AddScoped<IRevokedTokenRepository, RevokedTokenRepository>();
+builder.Services.AddScoped<ISubmissionService, SubmissionService>();
+builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IForm1040Calculator, Form1040Calculator>();
 builder.Services.AddScoped<IForm1040Validator, Form1040Validator>();
 builder.Services.Configure<Form1040PdfOptions>(configuration.GetSection("Pdf"));
