@@ -1,0 +1,30 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Frontend dependencies/build output
+**/node_modules/
+Client/dist/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+**/secrets.json
+
+# Local application data, generated PDFs, and logs
+Api/*.db
+Api/*.db-*
+Api/storage/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
