@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Api.Services;
 
-public sealed class AdminUserService(IUserRepository users) : IAdminUserService
+public sealed class AdminUserService(IUserRepository users, ILogger<AdminUserService> logger) : IAdminUserService
 {
     private static readonly string[] AllowedRoles = ["Admin", "Preparer", "Reviewer"];
 
@@ -20,18 +20,15 @@ public sealed class AdminUserService(IUserRepository users) : IAdminUserService
             return new(false, null, "Role must be Admin, Preparer, or Reviewer.");
 
         var email = request.Email.Trim();
-        var created = await users.CreateAsync(email, request.TemporaryPassword, cancellationToken);
-        if (!created.Operation.Succeeded || created.User is null)
-            return new(false, null, "Unable to create user.", Errors: created.Operation.Errors);
-
-        var assigned = await users.AssignRoleAsync(created.User, request.Role, cancellationToken);
-        if (!assigned.Succeeded)
+        var created = await users.CreateAsync(email, request.TemporaryPassword, request.Role, cancellationToken);
+        if (!created.Succeeded || created.Id is null)
         {
-            await users.DeleteAsync(created.User, cancellationToken);
-            return new(false, null, "The account could not be assigned its role.", StatusCodes.Status500InternalServerError);
+            logger.LogWarning("Admin user creation failed. Identity error count: {ErrorCount}.", created.Errors.Count);
+            return new(false, null, "Unable to create user.", Errors: created.Errors);
         }
 
-        return new(true, new AdminUserCreated(created.User.Id, created.User.Email, request.Role), null, StatusCodes.Status201Created);
+        logger.LogInformation("Admin created user {UserId} with role {Role}.", created.Id, request.Role);
+        return new(true, new AdminUserCreated(created.Id, created.Email, request.Role), null, StatusCodes.Status201Created);
     }
 
     public async Task<ServiceResult<IReadOnlyList<string>>> ChangeRolesAsync(string userId, ChangeUserRolesRequest request, CancellationToken cancellationToken)

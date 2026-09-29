@@ -63,19 +63,17 @@ public sealed class UserRepository(
 
         var removed = await userManager.RemoveFromRolesAsync(user, existing);
         if (!removed.Succeeded)
-            return new(false, false, false, existing, Map(removed).Errors);
+            return new(false, false, false, existing, removed.Errors.Select(error => error.Code).ToArray());
 
         var added = await userManager.AddToRolesAsync(user, requested);
         if (added.Succeeded)
             return new(true, false, false, requested, []);
 
         var rollback = await userManager.AddToRolesAsync(user, existing);
-        var errors = Map(added).Errors.ToList();
+        var errors = added.Errors.Select(error => error.Code).ToList();
         if (!rollback.Succeeded)
             errors.AddRange(rollback.Errors.Select(error => $"Role rollback failed: {error.Code}"));
         return new RoleChangeResult(false, false, false, existing, errors);
     }
 
-    private static IdentityOperation Map(IdentityResult result) =>
-        new(result.Succeeded, result.Errors.Select(error => error.Code).ToArray());
 }
