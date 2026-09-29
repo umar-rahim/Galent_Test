@@ -73,5 +73,13 @@ public sealed class SubmissionRepository(ApplicationDbContext db) : ISubmissionR
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken) => db.SaveChangesAsync(cancellationToken);
+    public async Task SubmitAsync(Form1040Submission submission, CancellationToken cancellationToken)
+    {
+        submission.Status = SubmissionStatus.Submitted;
+        submission.SubmittedAtUtc = DateTime.UtcNow;
+        submission.UpdatedAtUtc = DateTime.UtcNow;
+        db.ValidationFindings.RemoveRange(submission.Findings);
+        submission.Findings.Clear();
+        await db.SaveChangesAsync(cancellationToken);
+    }
 }

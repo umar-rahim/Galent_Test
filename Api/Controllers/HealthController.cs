@@ -1,12 +1,12 @@
+using Api.Services.Contracts;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Api.Controllers
+namespace Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public sealed class HealthController(IHealthService healthService) : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class HealthController : ControllerBase
-    {
-        [HttpGet]
-        public IActionResult Get() => Ok(new { status = "ok" });
-    }
+    [HttpGet]
+    public IActionResult Get() => Ok(healthService.GetStatus());
 }

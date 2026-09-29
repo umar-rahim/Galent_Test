@@ -18,6 +18,6 @@ public interface ISubmissionRepository
     Task AddAsync(Form1040Submission submission, CancellationToken cancellationToken);
     Task UpdateDraftAsync(Form1040Submission submission, Form1040Data incoming, CancellationToken cancellationToken);
     Task ReplaceFindingsAsync(Form1040Submission submission, IReadOnlyCollection<ValidationFinding> findings, CancellationToken cancellationToken);
+    Task SubmitAsync(Form1040Submission submission, CancellationToken cancellationToken);
     Task ClearFindingsAsync(Form1040Submission submission, CancellationToken cancellationToken);
-    Task SaveChangesAsync(CancellationToken cancellationToken);
 }

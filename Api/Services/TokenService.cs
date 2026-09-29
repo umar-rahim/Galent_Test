@@ -4,10 +4,11 @@ using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using Api.Models;
+using Api.Services.Contracts;
 
 namespace Api.Services
 {
-    public class TokenService
+    public sealed class TokenService : ITokenService
     {
         private readonly IConfiguration _config;
         public TokenService(IConfiguration config)
@@ -15,7 +16,7 @@ namespace Api.Services
             _config = config;
         }
 
-        public string CreateToken(ApplicationUser user, IList<string> roles)
+        public string CreateToken(ApplicationUser user, IReadOnlyList<string> roles)
         {
             var secret = _config["JWT_SECRET"] ?? throw new InvalidOperationException("JWT_SECRET is required.");
             var key = Encoding.UTF8.GetBytes(secret);
