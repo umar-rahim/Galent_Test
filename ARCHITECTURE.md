@@ -1,107 +1,182 @@
-# Galent AI — Architecture (Phase 1)
+# Galent 1040 (2025) — System Architecture
 
-## Overview
-This document describes the planned architecture for the local-only Galent 1040 (2025) application. The app provides authenticated, role-based web access for filling IRS Form 1040 (2025), validating it, generating a filled PDF from the official provided form, and storing generated PDFs on the local file system.
+## 1. Purpose and scope
 
-Tech stack (planned)
-- Backend: ASP.NET Core Web API (net8.0), EF Core (SQLite), Identity + JWT
-- Frontend: React + TypeScript (Vite)
-- PDF: PdfSharpCore (preferred) or iText7 (AGPL — choose explicitly)
-- Storage: Local file system via IDocumentStore abstraction
-- Hosting: Docker Compose (local)
+Galent is a local-first application for authorized preparers to create, save, validate, and submit 2025 Form 1040 drafts; reviewers and administrators can inspect permitted submissions; administrators manage team accounts and roles. Submitted returns can be rendered to PDF and stored on the local filesystem for authorized download.
 
-## Components
-- Api (ASP.NET Core Web API)
-  - Authentication & Authorization (Identity + JWT)
-  - Submission API (create/save/draft/submit)
-  - Validation engine (server authoritative)
-  - PDF generation service (IForm1040PdfService)
-  - Document storage (IDocumentStore -> LocalFileDocumentStore)
-  - Admin endpoints (user management, role assignment)
-- Client (React)
-  - Login, dashboard, 1040 form UI, My Submissions, Reviewer views, Admin user management
-- assets/
-  - Official f1040.pdf (must be placed here: ./assets/f1040.pdf)
+This document describes the repository's current architecture and distinguishes implemented behavior from items requiring confirmation. It is not a tax-preparation specification or assurance that a return is IRS-compliant. The server is authoritative for calculation, validation, access control, and document generation.
 
-## Repository status (inspection results)
-- `Api/` and `Client/` scaffolds exist in the workspace. `Api/Api.csproj` targets .NET 8; the frontend uses React, TypeScript, and Vite.
-- The configured solution path `C:\Galent_Project\Galent_Project.slnx` was not found during inspection. The only solution file discovered was `11.0/PlatformIntegration/Passkeys/Passkeys.sln`, unrelated to this app.
-- No official IRS Form 1040 PDF was found anywhere in the workspace. PHASE 2 cannot inspect or map PDF fields until the official 2025 PDF is supplied. The planned location is `assets/f1040.pdf`; do not fetch it at runtime.
-- No Dockerfile or docker-compose.yml were found.
-- Current `Api/appsettings.json` and `Api/Program.cs` contain development credentials and a fallback JWT key. These are existing scaffold values, not an acceptable final configuration; PHASE 3 must remove them and require configured secrets.
-- Git status/commit could not be verified because `git` is not available in this environment.
+## 2. Technology and deployment boundaries
 
-## Database model (first-cut)
-- AspNetUsers / AspNetRoles (Identity)
-- Form1040Submission
-  - Id (GUID)
-  - UserId (FK to AspNetUsers)
-  - Status (Draft | Submitted | Validated)
-  - CreatedAt, UpdatedAt, SubmittedAt
-  - Data (normalized fields mapped to domain model; stored as JSON in a column or normalized columns depending on design)
-  - CalculatedValues (server-calculated totals stored for audit)
-  - LatestDocumentId (FK to generated document metadata)
-- Document
-  - Id (GUID)
-  - SubmissionId
-  - Path (relative to storage root)
-  - CreatedAt
-  - Hash/Checksum (optional)
-- ValidationFinding
-  - Id
-  - SubmissionId
-  - Code
-  - Severity (Error | Warning)
-  - Field (domain path)
-  - Message
+- **API:** ASP.NET Core Web API, .NET 10, C#; built-in structured `ILogger` logging.
+- **Persistence:** EF Core 10, SQLite; ASP.NET Core Identity stores users and roles in the same database.
+- **Authentication:** Identity password verification and short-lived signed JWT bearer access tokens; token revocation records support logout.
+- **Client:** React, TypeScript, and Vite.
+- **PDF:** PDFsharp 6.2.4 with a configured local AcroForm template path (`Pdf:TemplatePath`, default `assets/f1040.pdf`). Field mapping code exists; it must be tested against the actual official 2025 PDF before use.
+- **Documents:** `IDocumentStore` abstraction with `LocalFileDocumentStore`; files are not served as static/public content.
+- **Hosting:** Local development is documented as separate API and Vite processes. Docker Compose is not currently present in the inspected repository.
+- **External/cloud dependencies:** No application cloud service is intended. Packages are restored from configured NuGet/npm feeds during development/build; the running app uses local SQLite and local files.
 
-Note: This is a proposed model, not the existing database schema. SSNs must be masked in API responses; encryption-at-rest must either be implemented or explicitly documented as a limitation.
+## 3. Logical component architecture
 
-## API surface (first-cut)
-- POST /api/auth/login -> { token }
-- POST /api/auth/register -> create user (Admin only for role assignment)
-- GET /api/submissions -> list submissions (Preparer: own; Reviewer/Admin: scoped)
-- POST /api/submissions -> create draft
-- GET /api/submissions/{id} -> get submission (authorization enforced)
-- PUT /api/submissions/{id} -> update (save draft or submit)
-- POST /api/submissions/{id}/validate -> server-side validation; returns findings
-- POST /api/submissions/{id}/generate-pdf -> validate + generate PDF; stores via IDocumentStore
-- GET /api/submissions/{id}/documents -> list documents for submission
-- GET /api/submissions/{id}/documents/{documentId} -> authorized download
-- GET /api/admin/users -> (Admin) list users
-- POST /api/admin/users -> (Admin) create user
-- PUT /api/admin/users/{id}/roles -> (Admin) change roles
+```text
+React/Vite client
+    │ HTTP JSON / bearer JWT; PDF streamed from authorized endpoint
+    ▼
+ASP.NET Core middleware
+    ├─ request metadata logging (method, path, status, duration; no body/headers)
+    ├─ HTTPS redirect, CORS, JWT authentication, role authorization
+    └─ exception handling (generic production error response)
+         ▼
+Controllers (HTTP adapters; claims and HTTP status/serialization)
+         ▼
+Application services (use cases, validation/calculation orchestration, access rules)
+    ├─ AuthService / AdminUserService
+    ├─ SubmissionService / DocumentService
+    ├─ Form1040Calculator / Form1040Validator / Form1040PdfService
+    └─ IDocumentStore → LocalFileDocumentStore
+         ▼
+Repositories (Identity/EF persistence boundaries)
+    ├─ IUserRepository → ASP.NET Core Identity managers
+    ├─ ISubmissionRepository → ApplicationDbContext
+    ├─ IDocumentRepository → ApplicationDbContext
+    └─ IRevokedTokenRepository → ApplicationDbContext
+         ▼
+SQLite database                 Local private document directory
+```
 
-Use appropriate HTTP status codes and never return raw SSNs in GET/list responses.
+### Responsibilities
 
-## Authentication & Authorization
-- ASP.NET Core Identity for user management and password hashing.
-- JWT access tokens for bearer authentication. JWT secret must be provided via environment variable or user-secrets (JWT_SECRET).
-- Role-based authorization using [Authorize(Roles = "Admin")] and policies for endpoints.
-- Token expiry: tokens short-lived (e.g., 8 hours) with refresh handled by re-login (no refresh tokens in initial MVP).
+- **Controllers** bind HTTP input, build actor identity from authenticated claims, delegate to services, and map service results to status codes and file responses. They do not contain database queries or tax calculations.
+- **Services** implement use cases and domain orchestration. They enforce ownership/access rules in addition to endpoint role attributes; recompute derived values server-side; validate data; and return typed results/findings.
+- **Repositories** isolate database and Identity persistence. Identity entities/managers should remain behind `IUserRepository`; EF queries and persistence operations remain behind repository interfaces.
+- **Domain/PDF services** isolate calculations, validation, PDF mapping, and physical file I/O.
+- **Client** improves usability and may calculate values for immediate display, but client calculations and validation are never trusted by the API.
 
-## PDF mapping strategy
-- PHASE 2 will enumerate AcroForm fields from the bundled PDF.
-- Implement IForm1040PdfService and Form1040PdfMapper.
-- Maintain a single mapping table (C# map/dictionary) that maps domain fields -> PDF field names and transformations (money formatting, checkboxes, radio groups).
-- The server recalculates computed fields and uses server-calculated values when populating the PDF.
+## 4. Runtime and data flows
 
-## Storage strategy
-- IDocumentStore interface with LocalFileDocumentStore implementation.
-- Storage path template: {storageRoot}/{environment}/{userId}/{submissionId}/{timestamp}.pdf
-- storageRoot must be configurable via appsettings/environment variable.
-- Documents are not served from a public static folder; downloads go through authorized API endpoints.
+### Login and logout
 
-## Security & PII
-- Do not log SSNs or other PII.
-- Mask SSNs in API responses (e.g., ***-**-1234) and UI.
-- Keep secrets out of Git; use environment variables or dotnet user-secrets for JWT secret and admin credentials.
-- Validate paths to prevent traversal when reading documents.
-- Document encryption-at-rest limitations in DESIGN.md if not implementing file or DB encryption.
+1. Client posts credentials to `POST /api/auth/login`.
+2. `AuthService` delegates credential verification to `IUserRepository`/Identity. On success, `ITokenService` issues a JWT with user identifier, name, role claims, issuer, audience, expiry, and `jti`.
+3. The client stores and sends the bearer token for protected calls. Do not log or expose the token in URLs.
+4. JWT middleware validates signature, issuer, audience, and lifetime. Its token-validated event rejects missing `jti` values and asks `IAuthService` whether the token is revoked.
+5. `POST /api/auth/logout` records the current token id and expiry in the revoked-token table. Since JWT is otherwise stateless, revocation checks require a local database lookup.
 
-## Testing plan (high level)
-- Unit tests: calculation engine, validators, SSN/format validators, PDF mapping transforms.
-- Integration tests: Auth flows, authorization, submission lifecycle, document download authorization.
+Tokens are short-lived (configured under `Jwt:AccessTokenMinutes`, bounded by the token service); refresh tokens are not implemented. The user must log in again after expiry.
 
-## Next steps (PHASE 2+)
-1. Add official f1040.pdf at ./assets/f1040.pdf and perform AcroForm field discovery.
+### Submission lifecycle
+
+1. A Preparer creates a Draft; the API associates it with the authenticated user.
+2. Draft reads and edits require ownership and Preparer role. The service recalculates computed lines before persistence; a draft save replaces dependent records and clears stale validation findings.
+3. Validation recalculates and persists the latest findings, then returns structured findings and calculated lines. Reviewers/Admins may inspect submissions under the configured access rules; reviewers/admins may validate submitted submissions.
+4. Submission is allowed to its owning Preparer only while Draft. Server validation runs before status becomes Submitted; errors produce `422` plus findings. Successful submission records status and timestamps.
+5. PDF generation is permitted only for a Submitted, accessible submission. Server validation is rerun; errors prevent generation. The PDF service fills the local template, document bytes are stored by `IDocumentStore`, metadata/hash are persisted, and bytes are streamed in the response.
+6. Document listing and downloads check submission access before returning metadata or opening a file. Files are never exposed via a public static directory.
+
+### Authorization matrix (current intent)
+
+| Operation | Preparer | Reviewer | Admin |
+|---|---|---|---|
+| List submissions | Own submissions | All submissions | All submissions |
+| Create submission | Yes | No | Depends on Admin also having Preparer role (create action requires Preparer) |
+| Read submission | Own | All | All |
+| Edit/save draft | Own Draft | No | Only if also owner and Preparer |
+| Validate | Accessible Draft; submitted validation not allowed | Accessible submitted returns | Accessible submitted returns |
+| Submit | Own Draft | No | Only if also Preparer and owner |
+| List/download/generate documents | Accessible submission | Accessible submission | Accessible submission |
+| Manage users/roles | No | No | Yes |
+
+Role combinations are allowed. Endpoint attributes provide coarse role checks; service ownership checks are still required to prevent IDOR. A 404 is used for missing or inaccessible submission resources where the service intentionally avoids disclosing existence.
+
+## 5. API contract
+
+All routes are under `/api`; protected routes require `Authorization: Bearer <JWT>`. Responses use JSON except successful PDF downloads. Exact request/response DTOs are defined in `Api/Models` and `Api/Services/Contracts`; avoid changing wire contracts without coordinating the client.
+
+| Method and route | Access | Purpose / result |
+|---|---|---|
+| `GET /api/health` | Anonymous | Health status. |
+| `POST /api/auth/login` | Anonymous | Login; returns `accessToken`, `expiresAtUtc`, and user id/email/roles. Invalid credentials return 401. |
+| `POST /api/auth/logout` | Authenticated | Revoke current JWT; returns 204. |
+| `GET /api/submissions` | Preparer, Reviewer, Admin | List; preparers see own records, reviewer/admin see all. SSN is masked in list data. |
+| `POST /api/submissions` | Preparer | Create Draft; returns 201 and id/status. |
+| `GET /api/submissions/{id}` | Preparer, Reviewer, Admin | Read accessible submission. Sensitive fields are masked for non-owner reviewer/admin reads according to service response mapping. |
+| `PUT /api/submissions/{id}` | Preparer | Save owner's Draft; body contains `form`. Server recalculates. |
+| `POST /api/submissions/{id}/validate` | Preparer, Reviewer, Admin | Validate accessible submission and return findings/calculated lines. |
+| `POST /api/submissions/{id}/submit` | Preparer | Validate and submit owner's Draft; 422 returns findings. |
+| `POST /api/submissions/{submissionId}/documents` | Preparer, Reviewer, Admin | Validate and generate/store PDF for an accessible Submitted return; success streams PDF. |
+| `GET /api/submissions/{submissionId}/documents` | Preparer, Reviewer, Admin | List authorized document metadata. |
+| `GET /api/submissions/{submissionId}/documents/{documentId}` | Preparer, Reviewer, Admin | Authorized PDF download. |
+| `GET /api/admin/users` | Admin | List users, roles, lockout information. |
+| `POST /api/admin/users` | Admin | Create user with initial allowed role; returns 201. |
+| `PUT /api/admin/users/{userId}/roles` | Admin | Replace roles; last-admin demotion is rejected with 409. |
+
+Common outcomes include 400 (invalid request), 401 (unauthenticated), 403 (role restriction), 404 (missing/inaccessible), 409 (invalid state/last admin), 422 (validation errors), and 500 (unexpected server failure). Do not expose exception details to clients in production.
+
+## 6. Domain and persistence model
+
+Database schema is managed through EF Core migrations in `Api/Data/Migrations`; startup applies migrations and initializes configured seed accounts/roles.
+
+- **Identity:** `AspNetUsers`, `AspNetRoles`, and Identity relationship/claim/token tables. Role names: `Preparer`, `Reviewer`, `Admin`.
+- **Form1040Submission:** GUID id, owner `UserId`, Draft/Submitted status, create/update/submit timestamps; one related form; validation findings and generated-document metadata.
+- **Form1040Data:** one-to-one form values, form identity/address/status flags, dependents, input and calculated 1040 lines, banking, designee, signature, and preparer blocks. Money is represented as decimal/nullable decimal; calculated lines are recalculated by the server.
+- **Form1040Dependent:** up to four listed dependents per return, identity/relationship and credit flags; separate relational records.
+- **ValidationFinding:** code, severity, field key, human-readable message, timestamp, associated submission. Current validator primarily returns errors; severity supports warnings.
+- **GeneratedDocument:** id, submission id, relative storage path, SHA-256, creation timestamp. Do not place absolute paths or file bytes in API responses.
+- **RevokedToken:** JWT id and expiry, used to reject logged-out tokens; expired entries may be cleaned up in a future maintenance process.
+
+Sensitive tax and identity data is stored in SQLite. Database-level encryption at rest is not implemented by the application; rely only on OS/disk protection in this local MVP and see `DESIGN.md` for the limitation.
+
+## 7. Calculation and validation
+
+`Form1040Calculator` computes the lines currently wired in the service: 1z, 9, 11a, 14, 15, 24, 25d, 33, 34, 37, and 35a. Filing-status standard deduction values are centralized. The client may mirror calculations for live UX, but the API overwrites computed values on save/validation/submit/PDF generation.
+
+`Form1040Validator` checks required taxpayer name/SSN/filing status, spouse SSN for Married Filing Separately, ZIP, dependent count and required data/credit conflict, bank details/routing checksum/account format, monetary magnitude/precision, third-party designee fields, and refund/amount-owed/carry-forward consistency. Structured findings carry stable code, severity, field path, and message.
+
+The requested acceptance criteria include reconciliation of all line totals and refund XOR amount owed. Review the implementation and add/adjust rules against official IRS 2025 instructions before production; a software test passing is not tax-law certification.
+
+## 8. PDF rendering and document storage
+
+- The template is local and configured through `Pdf:TemplatePath`; there is no runtime download.
+- `Form1040PdfService` opens the template with PDFsharp, discovers fields, maps form values, sets text/check values, and returns a stream.
+- The mapping must be verified against the official 2025 IRS fillable PDF, including all pages/checkboxes/calculated fields, by fixture-based tests and visual review. Do not infer field names from a different tax year.
+- `LocalFileDocumentStore` creates a private root and validates paths against traversal. Save uses a temporary file, atomic move, and SHA-256. Environment/user/submission segments are part of the relative path; storage root is configurable (`Storage:Root`, default `storage`).
+- Downloads are streamed only after repository and ownership/role checks. Apply filesystem permissions to keep storage accessible only to the application account and authorized administrators.
+- Keep SQLite and storage directories out of Git and back them up together with suitable access controls.
+
+## 9. Configuration and operations
+
+Required first-start configuration is provided by environment variables or .NET user-secrets (never source-controlled):
+
+- `JWT_SECRET`: random secret of at least 32 bytes.
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`: initial administrator.
+- `PREPARER_EMAIL`, `PREPARER_PASSWORD`, `REVIEWER_EMAIL`, `REVIEWER_PASSWORD`: optional local test identities where configured/seeded.
+- `ConnectionStrings__DefaultConnection`: optional SQLite connection override.
+- `Storage__Root`, `Pdf__TemplatePath`, `Frontend__Origin`, `Jwt__Issuer`, `Jwt__Audience`, `Jwt__AccessTokenMinutes`: optional settings overrides.
+
+`appsettings.json` contains non-secret defaults only. Seeded users are created when absent; changing seed environment variables does not reset an existing password. See `README.md` for PowerShell setup and commands.
+
+Logging uses built-in console providers and structured `ILogger` events. HTTP logging records method, path, status, and duration only; it does not include request/response bodies, headers, tokens, SSNs, or tax values. Keep PII out of all new log messages. Production exception responses are generic; full exception details are server-side only. No remote telemetry is configured by this application.
+
+## 10. Testing strategy
+
+- **Unit tests:** pure calculator and validator behavior; `LocalFileDocumentStore` path safety, hash, round-trip, missing file/cancellation; service use-case outcomes with repository/PDF/store fakes; token claims/expiry; PDF mapper tests against the actual official PDF fixture.
+- **Integration tests:** API startup with isolated in-memory SQLite; login/logout/revocation; authorization matrix; submission lifecycle; masking; admin behavior; document authorization and response headers.
+- **Client tests:** form calculations, validation display, route/role flows, API error handling, accessibility.
+- **Build gates:** `dotnet build Api/Api.csproj`, `dotnet test tests/Api.Tests/Api.Tests.csproj`, and client production build. Tests use synthetic data only; never real taxpayer data.
+
+The current test project contains a smoke/integration test and unit tests are being added. Coverage is not yet exhaustive and should not be represented as one test per file/method/scenario; focus on meaningful observable behaviors, branch boundaries, and security-sensitive cases.
+
+## 11. Current implementation status and known gaps
+
+Implemented code includes API controllers/services/repositories, Identity/JWT roles and revocation, SQLite entities/migrations, submission lifecycle, calculator/validator, PDFsharp service, local document store, React screens, and smoke tests. The repository has recently undergone layering and logging changes; run a full build and test suite to validate these together.
+
+Before claiming completion or relying on generated returns, verify:
+
+1. The current workspace search did not find `Api/assets/f1040.pdf`. The project expects this exact path; until the official 2025 fillable PDF is added, PDF generation is blocked and the existing field mapping is unverified.
+2. PDF field mapping is correct for that exact template and visually verified.
+3. Current calculation/validation rules match official 2025 instructions and all required lines/cross-field rules are covered.
+4. Encryption-at-rest is either implemented or the local OS/disk protection limitation is accepted.
+5. Docker Compose is added only if required; it is not currently present.
+6. Backend, client, migrations, and expanded tests all pass from a clean checkout with secrets configured. A full build/test run after the recent refactor and logging changes has not yet been completed.
+

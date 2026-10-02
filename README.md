@@ -1,25 +1,30 @@
 # Galent Local 1040
 
-A local-first web application for preparing and reviewing 2025 Form 1040 submissions. The repository contains an ASP.NET Core API and a React/Vite frontend. Data is stored in SQLite and generated documents are stored on local disk.
+A local-first application for preparing and reviewing 2025 Form 1040 submissions. The repository contains an ASP.NET Core Web API and a React/Vite frontend. Identity, JWT roles, SQLite persistence, submission validation, and local document storage are implemented in the current codebase.
 
-> **Status:** Authentication, role-based access, submission editing, validation, local document storage, and PDF-generation code are present. The IRS PDF template must be available at `Api/assets/f1040.pdf` for PDF generation. Confirm the template exists and test the field mapping before relying on generated documents. This software is not tax advice and generated returns must be reviewed.
+> **Important status:** The API includes PDF generation code configured to use `Api/assets/f1040.pdf`. Confirm the official 2025 template is present and verify all mapped fields and generated output before relying on it. Tax calculations and generated returns require review against official IRS instructions. This software is not tax advice.
 
-## Requirements
+## Architecture and design
 
-- .NET 10 SDK and ASP.NET Core 10 runtime
-- Node.js and npm
-- Windows PowerShell (commands below use PowerShell syntax)
+- [ARCHITECTURE.md](ARCHITECTURE.md) — components, request/data flows, roles, API routes, schema, storage, security, operations, testing, and implementation gaps.
+- [DESIGN.md](DESIGN.md) — concise design decisions, PII handling, encryption-at-rest limitation, validation, assumptions, and AI usage.
 
 ## Repository layout
 
-- `Api/` — ASP.NET Core Web API, Identity/JWT, EF Core/SQLite, validation, PDF, and local document storage
-- `Client/` — React + TypeScript frontend built with Vite
-- `tests/Api.Tests/` — API test project
-- `ARCHITECTURE.md`, `DESIGN.md` — design notes
+- `Api/` — ASP.NET Core Web API, Identity/JWT, EF Core/SQLite, calculation, validation, PDF, and local document storage.
+- `Client/` — React + TypeScript frontend built with Vite.
+- `tests/Api.Tests/` — API smoke/integration and unit tests (coverage is being expanded; not every method/branch is exhaustively tested).
+- `ARCHITECTURE.md`, `DESIGN.md` — design and status documentation.
+
+## Requirements
+
+- .NET 10 SDK and ASP.NET Core 10 runtime.
+- Node.js and npm.
+- Windows PowerShell examples below; adapt paths for other local environments.
 
 ## Configure and run locally
 
-Open two PowerShell terminals from `C:\Galent_Project` (or your repository checkout path). These are local development credentials only; use unique secrets and passwords outside local testing.
+Run the API and frontend in separate PowerShell terminals from the repository root. Use unique local credentials; do not commit secrets.
 
 ### 1. API
 
@@ -36,9 +41,9 @@ dotnet restore .\Api\Api.csproj
 dotnet run --project .\Api\Api.csproj --launch-profile Api
 ```
 
-The API profile listens at `http://127.0.0.1:5000`. Startup applies EF Core migrations and seeds the configured Admin, Preparer, and Reviewer accounts. In Development, Swagger is at `http://127.0.0.1:5000/swagger`.
+The API profile is documented to listen at `http://127.0.0.1:5000`; verify the active profile in `Api/Properties/launchSettings.json`. Startup applies EF Core migrations and initializes configured local accounts/roles. In Development, Swagger is available at the API's `/swagger` path.
 
-Seed account variables are required every time a new database is seeded. Existing accounts are not reset when the seed passwords change. SQLite defaults to `Api/galent.db`; document files default under the configured local storage root (`Api/storage`). Keep these local data files out of source control.
+Seed accounts are created when missing. Changing environment variables does not reset passwords for existing users. SQLite defaults to `Api/galent.db`; storage defaults to the configured local storage directory. Keep database and storage files out of source control.
 
 ### 2. Frontend
 
@@ -51,7 +56,7 @@ $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:5000"
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal (normally `http://localhost:5173`). Use one of the local accounts configured above. The API's default CORS origin is `http://localhost:5173`.
+Open the Vite URL shown in the terminal (typically `http://localhost:5173`). Configure the API CORS origin to match the frontend origin if it differs from the default.
 
 ### 3. Build and test
 
@@ -67,13 +72,23 @@ cd .\Client
 npm run build
 ```
 
-## PDF generation
+Tests must use synthetic data only. Test success does not certify IRS tax correctness or the PDF field map.
 
-The API expects the official fillable 2025 Form 1040 template at `Api/assets/f1040.pdf` (configured in `Api/appsettings.json`). The PDF code maps form data into PDF fields, validates before generation, and stores output locally. Verify the template is present and exercise PDF generation/download with synthetic test data before treating the output as verified. Do not commit taxpayer information or generated returns.
+## Configuration and secrets
 
-## Configuration and security notes
+- `JWT_SECRET` is required and must be at least 32 bytes.
+- Configure `ADMIN_EMAIL` and `ADMIN_PASSWORD` before first startup. Preparer and reviewer seed variables are used where enabled by the seeding implementation.
+- Optional overrides include connection string, `Storage:Root`, `Pdf:TemplatePath`, frontend origin, and JWT issuer/audience/lifetime.
+- Use environment variables or `dotnet user-secrets` for secrets. Do not put real credentials, tax records, PDFs, SQLite databases, or storage output in Git.
 
-- `JWT_SECRET` must be at least 32 bytes.
-- Set `ADMIN_EMAIL`/`ADMIN_PASSWORD`, `PREPARER_EMAIL`/`PREPARER_PASSWORD`, and `REVIEWER_EMAIL`/`REVIEWER_PASSWORD` before first startup.
-- Do not commit secrets, database files, local storage, build output, or real taxpayer data.
-- Use only synthetic data while developing and testing.
+## PDF generation and local storage
+
+The configured template path is `Api/assets/f1040.pdf`. Supply the official fillable 2025 IRS form locally; the application does not fetch it at runtime. Verify the exact AcroForm mapping and visually inspect generated output with synthetic data before use. Files are kept under the configured storage root, outside public static content, and retrieved through authorized API endpoints.
+
+## Known gaps
+
+- Verify the official 2025 PDF asset is present and its field mapping works; otherwise PDF generation is blocked/unverified.
+- Verify all calculations and validation requirements against current IRS instructions.
+- Application-level encryption at rest is not implemented; see `DESIGN.md` for the risk and mitigation assumptions.
+- Docker Compose is not currently documented as available; use the local API + Vite workflow above.
+- Unit and integration test coverage is growing and is not exhaustive for every file/method/scenario.
