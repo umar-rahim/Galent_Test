@@ -84,3 +84,82 @@ Tests must use synthetic data only. Test success does not certify IRS tax correc
 ## PDF generation and local storage
 
 The configured template path is `Api/assets/f1040.pdf`. Supply the official fillable 2025 IRS form locally; the application does not fetch it at runtime. Verify the exact AcroForm mapping and visually inspect generated output with synthetic data before use. Files are kept under the configured storage root, outside public static content, and retrieved through authorized API endpoints..
+
+Architecture
+                         ┌──────────────────────────┐
+                         │        USER / BROWSER     │
+                         └────────────┬─────────────┘
+                                      │
+                                      │ HTTP / JSON
+                                      │ Bearer JWT
+                                      ▼
+              ┌─────────────────────────────────────────┐
+              │             REACT CLIENT                 │
+              │         TypeScript + Vite               │
+              │                                         │
+              │  • Login                                │
+              │  • 1040 Form                            │
+              │  • Client-side validation/calculation   │
+              │  • Submission screens                   │
+              │  • Reviewer/Admin screens               │
+              └────────────────┬────────────────────────┘
+                               │
+                               │ REST API
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    ASP.NET CORE WEB API                           │
+│                         .NET 10 / C#                              │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ Middleware                                                 │  │
+│  │                                                            │  │
+│  │ CORS → JWT Authentication → Authorization → Error Handling│  │
+│  │                     → Structured Logging                  │  │
+│  └───────────────────────────┬────────────────────────────────┘  │
+│                              ▼                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                     CONTROLLERS                            │  │
+│  │                                                            │  │
+│  │ AuthController                                             │  │
+│  │ SubmissionController                                      │  │
+│  │ DocumentController                                        │  │
+│  │ AdminController                                           │  │
+│  └───────────────────────────┬────────────────────────────────┘  │
+│                              ▼                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                  APPLICATION SERVICES                      │  │
+│  │                                                            │  │
+│  │ AuthService                                                │  │
+│  │ AdminUserService                                           │  │
+│  │ SubmissionService                                         │  │
+│  │ DocumentService                                            │  │
+│  │                                                            │  │
+│  │ Form1040Calculator                                         │  │
+│  │ Form1040Validator                                          │  │
+│  │ Form1040PdfService                                         │  │
+│  └──────────────┬─────────────────┬───────────────────────────┘  │
+│                 │                 │                              │
+│                 ▼                 ▼                              │
+│       ┌──────────────────┐  ┌─────────────────────────┐         │
+│       │   REPOSITORIES   │  │   DOCUMENT STORAGE      │         │
+│       │                  │  │                         │         │
+│       │ UserRepository   │  │ IDocumentStore          │         │
+│       │ SubmissionRepo   │  │          ↓              │         │
+│       │ DocumentRepo     │  │ LocalFileDocumentStore  │         │
+│       │ RevokedTokenRepo │  │                         │         │
+│       └────────┬─────────┘  └────────────┬────────────┘         │
+│                │                         │                       │
+└────────────────┼─────────────────────────┼───────────────────────┘
+                 │                         │
+                 ▼                         ▼
+       ┌──────────────────┐       ┌──────────────────────┐
+       │   SQLite DB      │       │  Private File Store  │
+       │                  │       │                      │
+       │ • Users          │       │ • Generated PDFs     │
+       │ • Roles          │       │ • Document metadata  │
+       │ • Submissions    │       │ • SHA-256 hash       │
+       │ • Form 1040 data │       └──────────────────────┘
+       │ • Dependents     │
+       │ • Validations    │
+       │ • Revoked tokens │
+       └──────────────────┘
