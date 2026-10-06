@@ -83,12 +83,4 @@ Tests must use synthetic data only. Test success does not certify IRS tax correc
 
 ## PDF generation and local storage
 
-The configured template path is `Api/assets/f1040.pdf`. Supply the official fillable 2025 IRS form locally; the application does not fetch it at runtime. Verify the exact AcroForm mapping and visually inspect generated output with synthetic data before use. Files are kept under the configured storage root, outside public static content, and retrieved through authorized API endpoints.
-
-## Known gaps
-
-- Verify the official 2025 PDF asset is present and its field mapping works; otherwise PDF generation is blocked/unverified.
-- Verify all calculations and validation requirements against current IRS instructions.
-- Application-level encryption at rest is not implemented; see `DESIGN.md` for the risk and mitigation assumptions.
-- Docker Compose is not currently documented as available; use the local API + Vite workflow above.
-- Unit and integration test coverage is growing and is not exhaustive for every file/method/scenario.
+The configured template path is `Api/assets/f1040.pdf`. Supply the official fillable 2025 IRS form locally; the application does not fetch it at runtime. Verify the exact AcroForm mapping and visually inspect generated output with synthetic data before use. Files are kept under the configured storage root, outside public static content, and retrieved through authorized API endpoints..
