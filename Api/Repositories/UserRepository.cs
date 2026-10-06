@@ -17,7 +17,8 @@ public sealed class UserRepository(
         var result = await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true);
         if (!result.Succeeded)
             return null;
-        return new AuthenticatedUserRecord(user.Id, user.Email, await userManager.GetRolesAsync(user));
+        var roles = (await userManager.GetRolesAsync(user)).ToArray();
+        return new AuthenticatedUserRecord(user.Id, user.Email, roles);
     }
 
     public async Task<IReadOnlyList<AdminUserSummaryRecord>> ListAsync(CancellationToken cancellationToken)
@@ -25,7 +26,7 @@ public sealed class UserRepository(
         var users = await userManager.Users.AsNoTracking().OrderBy(user => user.Email).ToListAsync(cancellationToken);
         var result = new List<AdminUserSummaryRecord>(users.Count);
         foreach (var user in users)
-            result.Add(new AdminUserSummaryRecord(user.Id, user.Email, await userManager.GetRolesAsync(user), user.LockoutEnd));
+            result.Add(new AdminUserSummaryRecord(user.Id, user.Email, (await userManager.GetRolesAsync(user)).ToArray(), user.LockoutEnd));
         return result;
     }
 
@@ -55,7 +56,7 @@ public sealed class UserRepository(
         if (user is null)
             return new(false, true, false, [], []);
 
-        var existing = await userManager.GetRolesAsync(user);
+        var existing = (await userManager.GetRolesAsync(user)).ToArray();
         if (existing.Contains("Admin", StringComparer.Ordinal)
             && !requested.Contains("Admin", StringComparer.Ordinal)
             && (await userManager.GetUsersInRoleAsync("Admin")).Count <= 1)
